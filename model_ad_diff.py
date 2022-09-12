@@ -121,12 +121,12 @@ class TimeDependentAD:
         v = dl.TestFunction(Vh[STATE])
 
         def pde_varf(u, m, p):
-            return ufl.exp(m) * ufl.inner(dl.grad(u), dl.grad(p)) * ufl.dx + ufl.inner(wind_velocity,
+            return ufl.exp(m) * ufl.inner(dl.grad(u), dl.grad(p)) * ufl.dx - ufl.inner(wind_velocity,
                                                                                        dl.grad(u)) * p * ufl.dx
 
         self.pde_varf = pde_varf
 
-        kappa = dl.Constant(.01)
+        kappa = dl.Constant(.001)
         dt_expr = dl.Constant(dt)
 
         r_trial = u + dt_expr * (-ufl.div(kappa * ufl.grad(u)) + ufl.inner(wind_velocity, ufl.grad(u)))
@@ -139,6 +139,8 @@ class TimeDependentAD:
         else:
             tau = dl.Constant(0.)
 
+        self.stab = dl.assemble( tau*ufl.inner(r_trial, r_test)*ufl.dx)
+
         self.M = dl.assemble(ufl.inner(u, v) * ufl.dx)
         self.M_stab = dl.assemble(ufl.inner(u, v + tau * r_test) * ufl.dx)
         self.Mt_stab = dl.assemble(ufl.inner(u + tau * r_trial, v) * ufl.dx)
@@ -146,7 +148,6 @@ class TimeDependentAD:
         # Part of model public API
         self.gauss_newton_approx = True
         self.x = [None, None, None]
-        self.xhat = self.generate_vector()
 
     def generate_vector(self, component="ALL"):
         if component == "ALL":
@@ -182,19 +183,23 @@ class TimeDependentAD:
 
         return [reg + misfit, reg, misfit]
 
+    def define_Fwd_solver(self, x):
+        utest = dl.TestFunction(self.Vh[ADJOINT])
+        utrial = dl.TrialFunction(self.Vh[STATE])
+        m = vector2Function(x[PARAMETER], self.Vh[PARAMETER])
+
+        self.N = dl.assemble(self.pde_varf(utest, m, utrial))
+        self.L = self.M + self.dt * self.N + self.stab
+        self.solver = PETScLUSolver(self.mesh.mpi_comm())
+        self.solver.set_operator(dl.as_backend_type(self.L))
+
     def solveFwd(self, out, x):
         out.zero()
         x[STATE].store(self.ic, 0)
         uold = x[STATE].data[0].copy()
-        utest = dl.TestFunction(self.Vh[ADJOINT])
-        utrial = dl.TrialFunction(self.Vh[STATE])
-        m = vector2Function(x[PARAMETER], self.Vh[PARAMETER])
+        self.define_Fwd_solver(x)
         u = dl.Vector()
         rhs = dl.Vector()
-        self.N = dl.assemble(ufl.lhs(self.pde_varf(utest, m, utrial)))
-        self.L = self.M + self.dt * self.N
-        self.solver = PETScLUSolver(self.mesh.mpi_comm())
-        self.solver.set_operator(dl.as_backend_type(self.L))
         self.M.init_vector(rhs, 0)
         self.M.init_vector(u, 0)
         for t in self.simulation_times[1::]:
@@ -203,11 +208,23 @@ class TimeDependentAD:
             out.store(u, t)
             uold = u
 
+    def define_Adj_solver(self, x):
+        utest = dl.TestFunction(self.Vh[ADJOINT])
+        utrial = dl.TrialFunction(self.Vh[STATE])
+        m = vector2Function(x[PARAMETER], self.Vh[PARAMETER])
+
+        self.Nt = dl.assemble(self.pde_varf(utrial, m, utest))
+        self.Lt = self.M + self.dt * self.Nt + self.stab
+        self.solvert = dl.PETScLUSolver(self.mesh.mpi_comm())
+        self.solvert.set_operator(dl.as_backend_type(self.Lt))
+
     def solveAdj(self, out, x):
 
         grad_state = TimeDependentVector(self.simulation_times)
         grad_state.initialize(self.M, 0)
         self.misfit.grad(STATE, x, grad_state)
+
+        self.define_Adj_solver(x)
 
         out.zero()
 
@@ -221,14 +238,6 @@ class TimeDependentAD:
         self.M.init_vector(rhs, 0)
         self.M.init_vector(grad_state_snap, 0)
 
-        utest = dl.TestFunction(self.Vh[ADJOINT])
-        utrial = dl.TrialFunction(self.Vh[STATE])
-        m = vector2Function(x[PARAMETER], self.Vh[PARAMETER])
-
-        self.Nt = dl.assemble(ufl.lhs(self.pde_varf(utrial, m, utest)))
-        self.Lt = self.M + self.dt * self.Nt
-        self.solvert = dl.PETScLUSolver(self.mesh.mpi_comm())
-        self.solvert.set_operator(dl.as_backend_type(self.Lt))
 
         rhs = dl.Vector()
         for t in self.simulation_times[::-1]:
@@ -281,13 +290,11 @@ class TimeDependentAD:
 
         mg1 = dl.Vector()
         mg1.init(self.Vh[PARAMETER].dim())
-        # self.M.init_vector(mg1, 0)
         self.updategrade(mg1, x)
         mg.axpy(1., mg1)
 
         g = dl.Vector()
         g.init(self.Vh[PARAMETER].dim())
-        # self.M.init_vector(g,1)
         self.prior.Msolver.solve(g, mg)
         grad_norm = g.inner(mg)
         return grad_norm
@@ -323,7 +330,6 @@ class TimeDependentAD:
             self.solver.solve(u, Muold)
             sol.store(u, t)
             uold = u
-        self.xhat[STATE] = sol
 
     def solveAdjIncremental(self, sol, rhs):
 
@@ -345,14 +351,13 @@ class TimeDependentAD:
             pold = p
             sol.store(p, t)
 
-        self.xhat[ADJOINT] = sol
 
     def apply_ij(self, i, j, direction, out):
         out.zero()
 
         if not (i == STATE and j == STATE):
 
-            methodType = 3
+            methodType = 1
 
             m = vector2Function(self.x[PARAMETER], self.Vh[PARAMETER])
             utemp = dl.Vector()
@@ -470,7 +475,7 @@ class TimeDependentAD:
                     direction.retrieve(dpt, t)
 
                     self.x[STATE].retrieve(utemp, t)
-                    self.xhat[ADJOINT].retrieve(ptemp, t)
+                    self.x[ADJOINT].retrieve(ptemp, t)
 
                     ut = vector2Function(utemp, self.Vh[STATE])
                     pt = vector2Function(ptemp, self.Vh[ADJOINT])
@@ -500,7 +505,7 @@ class TimeDependentAD:
 
                     direction.retrieve(dut, t)
 
-                    self.xhat[STATE].retrieve(utemp, t)
+                    self.x[STATE].retrieve(utemp, t)
                     self.x[ADJOINT].retrieve(ptemp, t)
 
                     ut = vector2Function(utemp, self.Vh[STATE])
@@ -523,7 +528,6 @@ class TimeDependentAD:
 
     def applyC(self, dm, out):
         out.zero()
-        self.xhat[PARAMETER] = dm.copy()
         self.apply_ij(ADJOINT, PARAMETER, dm, out)
 
     def applyCt(self, dp, out):
