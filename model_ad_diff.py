@@ -121,7 +121,7 @@ class TimeDependentAD:
         v = dl.TestFunction(Vh[STATE])
 
         def pde_varf(u, m, p):
-            return ufl.exp(m) * ufl.inner(dl.grad(u), dl.grad(p)) * ufl.dx - ufl.inner(wind_velocity,
+            return ufl.exp(m) * ufl.inner(dl.grad(u), dl.grad(p)) * ufl.dx + ufl.inner(wind_velocity,
                                                                                        dl.grad(u)) * p * ufl.dx
 
         self.pde_varf = pde_varf
@@ -188,7 +188,7 @@ class TimeDependentAD:
         utrial = dl.TrialFunction(self.Vh[STATE])
         m = vector2Function(x[PARAMETER], self.Vh[PARAMETER])
 
-        self.N = dl.assemble(self.pde_varf(utest, m, utrial))
+        self.N = dl.assemble(self.pde_varf(utrial, m, utest))
         self.L = self.M + self.dt * self.N + self.stab
         self.solver = PETScLUSolver(self.mesh.mpi_comm())
         self.solver.set_operator(dl.as_backend_type(self.L))
@@ -213,7 +213,7 @@ class TimeDependentAD:
         utrial = dl.TrialFunction(self.Vh[STATE])
         m = vector2Function(x[PARAMETER], self.Vh[PARAMETER])
 
-        self.Nt = dl.assemble(self.pde_varf(utrial, m, utest))
+        self.Nt = dl.assemble(self.pde_varf(utest, m, utrial))
         self.Lt = self.M + self.dt * self.Nt + self.stab
         self.solvert = dl.PETScLUSolver(self.mesh.mpi_comm())
         self.solvert.set_operator(dl.as_backend_type(self.Lt))
@@ -485,7 +485,6 @@ class TimeDependentAD:
 
                 for t in self.simulation_times[1:]:
                     myout.zero()
-
                     direction.retrieve(dut, t)
 
                     self.x[STATE].retrieve(utemp, t)
