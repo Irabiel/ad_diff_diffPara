@@ -269,7 +269,7 @@ class TimeDependentAD:
 
         out.zero()
 
-        for t in self.simulation_times[1:]:
+        for t in self.simulation_times[1::]:
             u.retrieve(utemp, t)  # assign values to utemp = u(x, t)
             p.retrieve(ptemp, t)  # assign values to utemp = p(x, t)
             ut = dl.Function(self.Vh[STATE], utemp)  # as a function
@@ -356,7 +356,7 @@ class TimeDependentAD:
 
         if not (i == STATE and j == STATE):
 
-            methodType = 2
+            methodType = 1
 
             m = vector2Function(self.x[PARAMETER], self.Vh[PARAMETER])
             utemp = dl.Vector()
@@ -383,7 +383,7 @@ class TimeDependentAD:
 
                     if methodType == 1:
                         dir = vector2Function(direction, self.Vh[PARAMETER])
-                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), ut), m, dir), tensor=myout)
+                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m, dir), ut), tensor=myout)
                     else:
                         Wum = dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), ut), m))
                         Wum.mult(direction, myout)
@@ -411,7 +411,7 @@ class TimeDependentAD:
 
                     if methodType == 1:
                         dir = vector2Function(direction, self.Vh[PARAMETER])
-                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), pt), m, dir), tensor=myout)
+                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m, dir), pt), tensor=myout)
                     else:
                         Wpm = dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), pt), m))
                         Wpm.mult(direction, myout)
@@ -427,7 +427,7 @@ class TimeDependentAD:
                 dut = dl.Vector()
                 self.M.init_vector(dut, 0)
 
-                for t in self.simulation_times[1:]:
+                for t in self.simulation_times[1::]:
                     myout.zero()
 
                     self.x[STATE].retrieve(utemp, t)
@@ -438,7 +438,7 @@ class TimeDependentAD:
 
                     if methodType == 1:
                         dir = vector2Function(direction, self.Vh[PARAMETER])
-                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), m, dir), tensor=myout)
+                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m, dir), m), tensor=myout)
                     else:
                         Wmm = dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), m))
                         Wmm.mult(direction, myout)
@@ -467,7 +467,7 @@ class TimeDependentAD:
 
                     if methodType == 1:
                         dir = vector2Function(dpt, self.Vh[STATE])
-                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), pt, dir), tensor=myout)
+                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), pt, dir), m), tensor=myout)
                     else:
                         Wmp = dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), pt))
                         Wmp.mult(dpt, myout)
@@ -483,7 +483,7 @@ class TimeDependentAD:
                 dut = dl.Vector()
                 self.M.init_vector(dut, 0)
 
-                for t in self.simulation_times[1:]:
+                for t in self.simulation_times[1::]:
                     myout.zero()
                     direction.retrieve(dut, t)
 
@@ -495,7 +495,7 @@ class TimeDependentAD:
 
                     if methodType == 1:
                         dir = vector2Function(dut, self.Vh[STATE])
-                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), ut, dir), tensor=myout)
+                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), ut, dir), m), tensor=myout)
                     else:
                         Wmu = dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), ut))
                         Wmu.mult(dut, myout)
