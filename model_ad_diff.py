@@ -121,7 +121,7 @@ class TimeDependentAD:
         v = dl.TestFunction(Vh[STATE])
 
         def pde_varf(u, m, p):
-            return ufl.exp(m) * ufl.inner(dl.grad(u), dl.grad(p)) * ufl.dx - ufl.inner(wind_velocity,
+            return ufl.exp(m) * ufl.inner(dl.grad(u), dl.grad(p)) * ufl.dx + ufl.inner(wind_velocity,
                                                                                        dl.grad(u)) * p * ufl.dx
 
         self.pde_varf = pde_varf
@@ -188,7 +188,7 @@ class TimeDependentAD:
         utrial = dl.TrialFunction(self.Vh[STATE])
         m = vector2Function(x[PARAMETER], self.Vh[PARAMETER])
 
-        self.N = dl.assemble(self.pde_varf(utest, m, utrial))
+        self.N = dl.assemble(self.pde_varf(utrial, m, utest))
         self.L = self.M + self.dt * self.N + self.stab
         self.solver = PETScLUSolver(self.mesh.mpi_comm())
         self.solver.set_operator(dl.as_backend_type(self.L))
@@ -213,7 +213,7 @@ class TimeDependentAD:
         utrial = dl.TrialFunction(self.Vh[STATE])
         m = vector2Function(x[PARAMETER], self.Vh[PARAMETER])
 
-        self.Nt = dl.assemble(self.pde_varf(utrial, m, utest))
+        self.Nt = dl.assemble(self.pde_varf(utest, m, utrial))
         self.Lt = self.M + self.dt * self.Nt + self.stab
         self.solvert = dl.PETScLUSolver(self.mesh.mpi_comm())
         self.solvert.set_operator(dl.as_backend_type(self.Lt))
@@ -237,7 +237,6 @@ class TimeDependentAD:
         self.M.init_vector(p, 0)
         self.M.init_vector(rhs, 0)
         self.M.init_vector(grad_state_snap, 0)
-
 
         rhs = dl.Vector()
         for t in self.simulation_times[::-1]:
@@ -270,7 +269,7 @@ class TimeDependentAD:
 
         out.zero()
 
-        for t in self.simulation_times[1:]:
+        for t in self.simulation_times[1::]:
             u.retrieve(utemp, t)  # assign values to utemp = u(x, t)
             p.retrieve(ptemp, t)  # assign values to utemp = p(x, t)
             ut = dl.Function(self.Vh[STATE], utemp)  # as a function
@@ -384,17 +383,10 @@ class TimeDependentAD:
 
                     if methodType == 1:
                         dir = vector2Function(direction, self.Vh[PARAMETER])
-                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), ut), m, dir), tensor=myout)
-                    elif methodType == 2:
+                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m, dir), ut), tensor=myout)
+                    else:
                         Wum = dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), ut), m))
                         Wum.mult(direction, myout)
-                    else:
-                        utest = dl.TestFunction(self.Vh[ADJOINT])
-                        utrial = dl.TrialFunction(self.Vh[STATE])
-
-                        dir = vector2Function(direction, self.Vh[PARAMETER])
-                        Wum = dl.assemble(ufl.lhs(dl.derivative(self.pde_varf(utest, m, utrial), m, dir)))
-                        Wum.mult(utemp, myout)
 
                     myout *= self.dt
                     out.store(myout, t)
@@ -419,17 +411,10 @@ class TimeDependentAD:
 
                     if methodType == 1:
                         dir = vector2Function(direction, self.Vh[PARAMETER])
-                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), pt), m, dir), tensor=myout)
-                    elif methodType == 2:
+                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m, dir), pt), tensor=myout)
+                    else:
                         Wpm = dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), pt), m))
                         Wpm.mult(direction, myout)
-                    else:
-                        utest = dl.TestFunction(self.Vh[ADJOINT])
-                        utrial = dl.TrialFunction(self.Vh[STATE])
-
-                        dir = vector2Function(direction, self.Vh[PARAMETER])
-                        Wpm = dl.assemble(ufl.lhs(dl.derivative(self.pde_varf(utest, m, utrial), m, dir)))
-                        Wpm.mult(utemp, myout)
 
                     myout *= self.dt
                     out.store(myout, t)
@@ -442,7 +427,7 @@ class TimeDependentAD:
                 dut = dl.Vector()
                 self.M.init_vector(dut, 0)
 
-                for t in self.simulation_times[1:]:
+                for t in self.simulation_times[1::]:
                     myout.zero()
 
                     self.x[STATE].retrieve(utemp, t)
@@ -453,7 +438,7 @@ class TimeDependentAD:
 
                     if methodType == 1:
                         dir = vector2Function(direction, self.Vh[PARAMETER])
-                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), m, dir), tensor=myout)
+                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m, dir), m), tensor=myout)
                     else:
                         Wmm = dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), m))
                         Wmm.mult(direction, myout)
@@ -482,12 +467,10 @@ class TimeDependentAD:
 
                     if methodType == 1:
                         dir = vector2Function(dpt, self.Vh[STATE])
-                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), pt, dir), tensor=myout)
-                    elif methodType == 2:
+                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), pt, dir), m), tensor=myout)
+                    else:
                         Wmp = dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), pt))
                         Wmp.mult(dpt, myout)
-                    else:
-                        dl.assemble(dl.derivative(self.pde_varf(ut, m, pt), m), tensor=myout)
 
                     out += myout
                 out *= self.dt
@@ -500,9 +483,8 @@ class TimeDependentAD:
                 dut = dl.Vector()
                 self.M.init_vector(dut, 0)
 
-                for t in self.simulation_times[1:]:
+                for t in self.simulation_times[1::]:
                     myout.zero()
-
                     direction.retrieve(dut, t)
 
                     self.x[STATE].retrieve(utemp, t)
@@ -513,12 +495,10 @@ class TimeDependentAD:
 
                     if methodType == 1:
                         dir = vector2Function(dut, self.Vh[STATE])
-                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), ut, dir), tensor=myout)
-                    elif methodType == 2:
+                        dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), ut, dir), m), tensor=myout)
+                    else:
                         Wmu = dl.assemble(dl.derivative(dl.derivative(self.pde_varf(ut, m, pt), m), ut))
                         Wmu.mult(dut, myout)
-                    else:
-                        dl.assemble(dl.derivative(self.pde_varf(ut, m, pt), m), tensor=myout)
 
                     out += myout
                 out *= self.dt
